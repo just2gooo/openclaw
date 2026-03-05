@@ -236,12 +236,12 @@ function resolveFeishuGroupSession(params: {
   groupConfig?: {
     groupSessionScope?: GroupSessionScope;
     topicSessionMode?: "enabled" | "disabled";
-    replyInThread?: "enabled" | "disabled";
+    replyInThread?: "enabled" | "disabled" | "auto";
   };
   feishuCfg?: {
     groupSessionScope?: GroupSessionScope;
     topicSessionMode?: "enabled" | "disabled";
-    replyInThread?: "enabled" | "disabled";
+    replyInThread?: "enabled" | "disabled" | "auto";
   };
 }): ResolvedFeishuGroupSession {
   const { chatId, senderOpenId, messageId, rootId, threadId, groupConfig, feishuCfg } = params;
@@ -249,9 +249,13 @@ function resolveFeishuGroupSession(params: {
   const normalizedThreadId = threadId?.trim();
   const normalizedRootId = rootId?.trim();
   const threadReply = Boolean(normalizedThreadId || normalizedRootId);
+  const replyInThreadSetting = groupConfig?.replyInThread ?? feishuCfg?.replyInThread ?? "auto";
+  // "auto" mode: reply in thread only if the message is already in a thread (has rootId)
+  // "enabled" mode: always reply in thread
+  // "disabled" mode: never reply in thread
   const replyInThread =
-    (groupConfig?.replyInThread ?? feishuCfg?.replyInThread ?? "disabled") === "enabled" ||
-    threadReply;
+    (replyInThreadSetting === "enabled" || threadReply) ||
+    (replyInThreadSetting === "auto" && normalizedRootId);
 
   const legacyTopicSessionMode =
     groupConfig?.topicSessionMode ?? feishuCfg?.topicSessionMode ?? "disabled";
