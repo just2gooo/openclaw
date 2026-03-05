@@ -709,10 +709,9 @@ export async function handleFeishuMessage(params: {
   }
 
   // Task recovery: check for pending task from previous session
-  // Skip if this is a synthetic message from task-recovery (message_id starts with "task-recovery-")
   const pendingTask = getPendingTask();
   let taskContext = "";
-  if (pendingTask && !event.message.message_id.startsWith("task-recovery-")) {
+  if (pendingTask) {
     taskContext = `\n\n[任务恢复] 你有一个待恢复的任务: "${pendingTask.task}" (创建于 ${pendingTask.createdAt})\n请继续执行这个任务，完成后删除待恢复任务。`;
     log(`feishu[${account.accountId}]: found pending task: ${pendingTask.task}`);
     // Clear the task - will be re-saved if recovery fails
