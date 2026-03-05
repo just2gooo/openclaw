@@ -4,7 +4,6 @@ import * as os from "node:os";
 import type { ClawdbotConfig, RuntimeEnv } from "openclaw/plugin-sdk";
 import { createFeishuClient } from "./client.js";
 import { resolveFeishuAccount } from "./accounts.js";
-import { handleFeishuMessage, type FeishuMessageEvent } from "./bot.js";
 
 export interface PendingTask {
   task: string;
@@ -49,7 +48,7 @@ export function clearPendingTask(): void {
   }
 }
 
-// Send notification and auto-continue task on startup
+// Send notification on startup and let the next user message trigger task recovery
 export async function notifyAndContinueTaskOnStartup(params: {
   cfg: ClawdbotConfig;
   accountId?: string;
@@ -93,40 +92,7 @@ export async function notifyAndContinueTaskOnStartup(params: {
     });
 
     log(`task-recovery: sent auto-continue notification to ${sendToId}`);
-
-    // Now trigger task continuation by constructing a synthetic message event
-    const taskContext = `\n\n[任务恢复] 你有一个待恢复的任务: "${pendingTask.task}" (创建于 ${pendingTask.createdAt})\n请继续执行这个任务，完成后删除待恢复任务。`;
-
-    const messageEvent: FeishuMessageEvent = {
-      sender: {
-        sender_id: {
-          open_id: pendingTask.senderOpenId || userOpenId,
-        },
-      },
-      message: {
-        message_id: `task-recovery-${Date.now()}`,
-        chat_id: pendingTask.chatId || userOpenId,
-        chat_type: pendingTask.chatType || "p2p",
-        message_type: "text",
-        content: JSON.stringify({ text: "任务自动继续" + taskContext }),
-      },
-    };
-
-    log(`task-recovery: triggering task continuation for: ${pendingTask.task}`);
-
-    // Clear the task now - it will be re-saved if continuation fails
-    clearPendingTask();
-
-    // Trigger task continuation
-    await handleFeishuMessage({
-      cfg: params.cfg,
-      event: messageEvent,
-      botOpenId: undefined,
-      runtime: params.runtime,
-      accountId: params.accountId,
-    });
-
   } catch (err) {
-    log(`task-recovery: failed to auto-continue task: ${err}`);
+    log(`task-recovery: failed to send notification: ${err}`);
   }
 }
