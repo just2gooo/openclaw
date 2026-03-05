@@ -4,6 +4,7 @@ import * as os from "node:os";
 import type { ClawdbotConfig, RuntimeEnv } from "openclaw/plugin-sdk";
 import { createFeishuClient } from "./client.js";
 import { resolveFeishuAccount } from "./accounts.js";
+import { handleFeishuMessage, type FeishuMessageEvent } from "./bot.js";
 
 export interface PendingTask {
   task: string;
@@ -48,7 +49,7 @@ export function clearPendingTask(): void {
   }
 }
 
-// Send notification on startup and let the next user message trigger task recovery
+// Send notification on startup and trigger task execution via handleFeishuMessage
 export async function notifyAndContinueTaskOnStartup(params: {
   cfg: ClawdbotConfig;
   accountId?: string;
@@ -79,6 +80,7 @@ export async function notifyAndContinueTaskOnStartup(params: {
     // Determine where to send the message: use saved chatId or default to user
     const sendToId = pendingTask.chatId || userOpenId;
     const receiveIdType = (pendingTask.chatId && pendingTask.chatId.startsWith("oc_")) ? "chat_id" : "open_id";
+    const chatType = pendingTask.chatType || (pendingTask.chatId?.startsWith("oc_") ? "group" : "p2p");
 
     const messageText = `✅ *已重启上线，任务自动继续*\n\n${pendingTask.task}\n\n（创建于 ${pendingTask.createdAt}）`;
 
@@ -91,8 +93,40 @@ export async function notifyAndContinueTaskOnStartup(params: {
       },
     });
 
-    log(`task-recovery: sent auto-continue notification to ${sendToId}`);
+    log(`task-recovery: sent notification to ${sendToId}, now triggering task execution`);
+
+    // Construct a synthetic message event to trigger agent to execute the task
+    const taskContext = `\n\n[任务恢复] 你有一个待恢复的任务: "${pendingTask.task}" (创建于 ${pendingTask.createdAt})\n请继续执行这个任务，完成后删除待恢复任务。`;
+
+    const messageEvent: FeishuMessageEvent = {
+      sender: {
+        sender_id: {
+          open_id: pendingTask.senderOpenId || userOpenId,
+        },
+      },
+      message: {
+        message_id: `task-recovery-${Date.now()}`,
+        chat_id: sendToId,
+        chat_type: chatType,
+        message_type: "text",
+        content: JSON.stringify({ text: "任务自动继续" + taskContext }),
+      },
+    };
+
+    // Clear the task now - it will be re-saved if execution fails
+    clearPendingTask();
+
+    // Trigger agent to execute the task
+    await handleFeishuMessage({
+      cfg: params.cfg,
+      event: messageEvent,
+      botOpenId: undefined,
+      runtime: params.runtime,
+      accountId: params.accountId,
+    });
+
+    log(`task-recovery: triggered task execution for: ${pendingTask.task}`);
   } catch (err) {
-    log(`task-recovery: failed to send notification: ${err}`);
+    log(`task-recovery: failed to auto-continue task: ${err}`);
   }
 }
