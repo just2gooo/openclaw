@@ -49,29 +49,28 @@ export async function notifyPendingTaskOnStartup(params: {
   cfg: ClawdbotConfig;
   accountId?: string;
   userOpenId?: string; // Optional: specific user to notify
-}): Promise<void> {
+}): Promise<PendingTask | null> {
   const pendingTask = getPendingTask();
   if (!pendingTask) {
-    return;
+    return null;
   }
 
   // Use provided userOpenId or try to get from config
   const userOpenId = params.userOpenId;
   if (!userOpenId) {
-    // No user to notify, just clear the task
-    console.log("task-recovery: no userOpenId provided, clearing pending task");
-    clearPendingTask();
-    return;
+    // No user to notify, just return the task for auto-recovery
+    console.log("task-recovery: no userOpenId provided, will auto-recover on first message");
+    return pendingTask;
   }
 
   try {
     const account = resolveFeishuAccount({ cfg: params.cfg, accountId: params.accountId });
     if (!account.configured) {
-      return;
+      return pendingTask;
     }
 
     const client = createFeishuClient(account);
-    const messageText = `🔄 *任务恢复*\n\n我已重启上线。你有一个待恢复的任务：\n\n> ${pendingTask.task}\n\n（创建于 ${pendingTask.createdAt}）\n\n请告诉我继续执行或取消。`;
+    const messageText = `✅ *已重启上线*\n\n任务自动继续：${pendingTask.task}\n\n（创建于 ${pendingTask.createdAt}）`;
 
     await client.im.message.create({
       params: { receive_id_type: "open_id" },
@@ -85,4 +84,6 @@ export async function notifyPendingTaskOnStartup(params: {
   } catch (err) {
     console.error("task-recovery: failed to notify user:", err);
   }
+
+  return pendingTask;
 }
