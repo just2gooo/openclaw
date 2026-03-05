@@ -1,9 +1,11 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
-import type { ClawdbotConfig, RuntimeEnv } from "openclaw/plugin-sdk";
+import * as crypto from "crypto";
+import type { ClawdbotConfig, RuntimeEnv, HistoryEntry } from "openclaw/plugin-sdk";
 import { createFeishuClient } from "./client.js";
 import { resolveFeishuAccount } from "./accounts.js";
+import { handleFeishuMessage, type FeishuMessageEvent } from "./bot.js";
 
 export interface PendingTask {
   task: string;
@@ -48,7 +50,7 @@ export function clearPendingTask(): void {
   }
 }
 
-// Send notification on startup - actual task execution handled by bot.ts
+// Send notification on startup and trigger agent to continue the task
 export async function notifyAndContinueTaskOnStartup(params: {
   cfg: ClawdbotConfig;
   accountId?: string;
@@ -67,6 +69,7 @@ export async function notifyAndContinueTaskOnStartup(params: {
   }
 
   const log = params.runtime?.log ?? console.log;
+  const chatHistories = new Map<string, HistoryEntry[]>();
 
   try {
     const account = resolveFeishuAccount({ cfg: params.cfg, accountId: params.accountId });
@@ -92,7 +95,43 @@ export async function notifyAndContinueTaskOnStartup(params: {
     });
 
     log(`task-recovery: sent notification to ${sendToId}`);
+
+    // Create a synthetic message event to trigger the agent
+    // This simulates the user sending a message to continue the task
+    const syntheticEvent: FeishuMessageEvent = {
+      sender: {
+        sender_id: {
+          open_id: pendingTask.senderOpenId || userOpenId,
+        },
+        sender_type: "user",
+      },
+      message: {
+        // Use a unique message_id that won't conflict with real messages
+        message_id: `task-recovery:${crypto.randomUUID()}`,
+        chat_id: sendToId,
+        chat_type: pendingTask.chatType || "p2p",
+        message_type: "text",
+        content: JSON.stringify({
+          text: `[任务恢复] 继续执行之前未完成的任务: ${pendingTask.task}`,
+        }),
+        create_time: Date.now().toString(),
+      },
+    };
+
+    log(`task-recovery: triggering agent with synthetic event`);
+
+    // Call handleFeishuMessage to trigger the agent to continue the task
+    await handleFeishuMessage({
+      cfg: params.cfg,
+      event: syntheticEvent,
+      botOpenId: undefined,
+      runtime: params.runtime,
+      chatHistories,
+      accountId: params.accountId,
+    });
+
+    log(`task-recovery: agent triggered successfully`);
   } catch (err) {
-    log(`task-recovery: failed to send notification: ${err}`);
+    log(`task-recovery: failed to send notification or trigger agent: ${err}`);
   }
 }
