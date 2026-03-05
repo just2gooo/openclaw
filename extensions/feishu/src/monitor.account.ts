@@ -3,14 +3,14 @@ import * as Lark from "@larksuiteoapi/node-sdk";
 import type { ClawdbotConfig, RuntimeEnv, HistoryEntry } from "openclaw/plugin-sdk";
 import { resolveFeishuAccount } from "./accounts.js";
 import { raceWithTimeoutAndAbort } from "./async.js";
-import { handleFeishuMessage, type FeishuMessageEvent, type FeishuBotAddedEvent } from "./bot.js";
+import { handleFeishuMessage, type FeishuMessageEvent } from "./bot.js";
 import { handleFeishuCardAction, type FeishuCardActionEvent } from "./card-action.js";
 import { createEventDispatcher } from "./client.js";
 import { fetchBotOpenIdForMonitor } from "./monitor.startup.js";
 import { botOpenIds } from "./monitor.state.js";
 import { monitorWebhook, monitorWebSocket } from "./monitor.transport.js";
 import { getMessageFeishu } from "./send.js";
-import { notifyPendingTaskOnStartup, getPendingTask, clearPendingTask } from "./task-recovery.js";
+import { getPendingTask, clearPendingTask, notifyAndContinueTaskOnStartup } from "./task-recovery.js";
 import type { ResolvedFeishuAccount } from "./types.js";
 
 const FEISHU_REACTION_VERIFY_TIMEOUT_MS = 1_500;
@@ -269,7 +269,7 @@ export async function monitorSingleAccount(params: MonitorSingleAccountParams): 
   if (feishuCfg) {
     const userOpenId = feishuCfg.groupAllowFrom?.find((id: string) => id.startsWith("ou_"));
     if (userOpenId) {
-      await notifyPendingTaskOnStartup({ cfg, accountId, userOpenId });
+      await notifyAndContinueTaskOnStartup({ cfg, accountId, userOpenId, runtime });
     }
   }
 

@@ -1,14 +1,19 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
-import type { ClawdbotConfig } from "openclaw/plugin-sdk";
+import type { ClawdbotConfig, RuntimeEnv } from "openclaw/plugin-sdk";
 import { createFeishuClient } from "./client.js";
 import { resolveFeishuAccount } from "./accounts.js";
+import { handleFeishuMessage, type FeishuMessageEvent } from "./bot.js";
 
 export interface PendingTask {
   task: string;
   createdAt: string;
   context?: Record<string, unknown>;
+  // For auto-recovery after restart
+  chatId?: string;
+  chatType?: "p2p" | "group";
+  senderOpenId?: string;
 }
 
 const TASK_FILE = path.join(os.homedir(), ".openclaw", "workspace", "memory", "pending-task.json");
@@ -44,46 +49,84 @@ export function clearPendingTask(): void {
   }
 }
 
-// Send notification to user on startup about pending task
-export async function notifyPendingTaskOnStartup(params: {
+// Send notification and auto-continue task on startup
+export async function notifyAndContinueTaskOnStartup(params: {
   cfg: ClawdbotConfig;
   accountId?: string;
-  userOpenId?: string; // Optional: specific user to notify
-}): Promise<PendingTask | null> {
+  userOpenId?: string;
+  runtime?: RuntimeEnv;
+}): Promise<void> {
   const pendingTask = getPendingTask();
   if (!pendingTask) {
-    return null;
+    return;
   }
 
-  // Use provided userOpenId or try to get from config
   const userOpenId = params.userOpenId;
   if (!userOpenId) {
-    // No user to notify, just return the task for auto-recovery
-    console.log("task-recovery: no userOpenId provided, will auto-recover on first message");
-    return pendingTask;
+    console.log("task-recovery: no userOpenId, skipping notification");
+    return;
   }
+
+  const log = params.runtime?.log ?? console.log;
 
   try {
     const account = resolveFeishuAccount({ cfg: params.cfg, accountId: params.accountId });
     if (!account.configured) {
-      return pendingTask;
+      return;
     }
 
     const client = createFeishuClient(account);
-    const messageText = `✅ *已重启上线*\n\n任务自动继续：${pendingTask.task}\n\n（创建于 ${pendingTask.createdAt}）`;
+
+    // Determine where to send the message: use saved chatId or default to user
+    const sendToId = pendingTask.chatId || userOpenId;
+    const receiveIdType = (pendingTask.chatId && pendingTask.chatId.startsWith("oc_")) ? "chat_id" : "open_id";
+
+    const messageText = `✅ *已重启上线，任务自动继续*\n\n${pendingTask.task}\n\n（创建于 ${pendingTask.createdAt}）`;
 
     await client.im.message.create({
-      params: { receive_id_type: "open_id" },
+      params: { receive_id_type: receiveIdType },
       data: {
-        receive_id: userOpenId,
+        receive_id: sendToId,
         msg_type: "text",
         content: JSON.stringify({ text: messageText }),
       },
     });
-    console.log(`task-recovery: notified user ${userOpenId} about pending task`);
-  } catch (err) {
-    console.error("task-recovery: failed to notify user:", err);
-  }
 
-  return pendingTask;
+    log(`task-recovery: sent auto-continue notification to ${sendToId}`);
+
+    // Now trigger task continuation by constructing a synthetic message event
+    const taskContext = `\n\n[任务恢复] 你有一个待恢复的任务: "${pendingTask.task}" (创建于 ${pendingTask.createdAt})\n请继续执行这个任务，完成后删除待恢复任务。`;
+
+    const messageEvent: FeishuMessageEvent = {
+      sender: {
+        sender_id: {
+          open_id: pendingTask.senderOpenId || userOpenId,
+        },
+      },
+      message: {
+        message_id: `task-recovery-${Date.now()}`,
+        chat_id: pendingTask.chatId || userOpenId,
+        chat_type: pendingTask.chatType || "p2p",
+        message_type: "text",
+        content: JSON.stringify({ text: "任务自动继续" + taskContext }),
+      },
+    };
+
+    log(`task-recovery: triggering task continuation for: ${pendingTask.task}`);
+
+    // Clear the task now - it will be re-saved if continuation fails
+    clearPendingTask();
+
+    // Trigger task continuation
+    await handleFeishuMessage({
+      cfg: params.cfg,
+      event: messageEvent,
+      botOpenId: undefined,
+      runtime: params.runtime,
+      accountId: params.accountId,
+    });
+
+  } catch (err) {
+    log(`task-recovery: failed to auto-continue task: ${err}`);
+  }
 }
