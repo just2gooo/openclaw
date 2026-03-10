@@ -91,7 +91,7 @@ function parseInteractiveCardContent(parsed: unknown): string {
   }
 
   const card = parsed as Record<string, unknown>;
-  
+
   // Handle raw_card_content format from API: contains json_card field
   if (card.json_card) {
     try {
@@ -101,7 +101,7 @@ function parseInteractiveCardContent(parsed: unknown): string {
       return "[Interactive Card]";
     }
   }
-  
+
   // Simple extraction from regular card structure
   return extractTextFromCard(parsed) || "[Interactive Card]";
 }
@@ -109,15 +109,17 @@ function parseInteractiveCardContent(parsed: unknown): string {
 function extractTextFromCard(obj: unknown): string {
   if (typeof obj === "string") return obj;
   if (!obj || typeof obj !== "object") return "";
-  if (Array.isArray(obj)) {
-    const results = obj.map(extractTextFromCard).filter(Boolean);
-    return results.length > 1 ? results.join("\n") : results[0] || "";
-  }
-  
+  if (Array.isArray(obj)) return obj.map(extractTextFromCard).filter(Boolean).join("\n");
+
   const o = obj as Record<string, unknown>;
   const fields = ["text", "content", "title", "label"];
   for (const f of fields) {
     if (typeof o[f] === "string") return o[f] as string;
+    // Handle nested text object: { text: { content: "..." } }
+    if (o[f] && typeof o[f] === "object") {
+      const nested = o[f] as Record<string, unknown>;
+      if (typeof nested.content === "string") return nested.content;
+    }
   }
   // Recurse into containers - collect from all, don't early-return
   const parts: string[] = [];
