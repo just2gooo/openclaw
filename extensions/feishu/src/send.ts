@@ -151,6 +151,7 @@ export async function getMessageFeishu(params: {
   try {
     const response = (await client.im.message.get({
       path: { message_id: messageId },
+      params: { card_msg_content_type: "raw_card_content" },
     })) as {
       code?: number;
       msg?: string;
