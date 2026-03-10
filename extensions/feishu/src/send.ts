@@ -90,27 +90,100 @@ function parseInteractiveCardContent(parsed: unknown): string {
     return "[Interactive Card]";
   }
 
-  const candidate = parsed as { elements?: unknown };
-  if (!Array.isArray(candidate.elements)) {
-    return "[Interactive Card]";
+  const card = parsed as Record<string, unknown>;
+  
+  // Handle raw_card_content format: contains json_card field
+  if (card.json_card) {
+    try {
+      const jsonCard = JSON.parse(card.json_card as string);
+      // Extract from body.elements
+      const body = jsonCard.body ?? jsonCard;
+      const elements = body?.property?.elements ?? body?.elements;
+      if (Array.isArray(elements)) {
+        const texts: string[] = [];
+        for (const el of elements) {
+          if (el && typeof el === "object") {
+            const e = el as Record<string, unknown>;
+            // Handle nested property.elements
+            if (e.property?.elements && Array.isArray(e.property.elements)) {
+              for (const nested of e.property.elements) {
+                if (nested && typeof nested === "object") {
+                  const n = nested as Record<string, unknown>;
+                  if (n.content) texts.push(String(n.content));
+                }
+              }
+            }
+            if (e.content) texts.push(String(e.content));
+            if (e.text) texts.push(String(e.text));
+          }
+        }
+        if (texts.length > 0) return texts.join(" | ");
+      }
+      // Fallback: extract any text from the json_card
+      const jsonStr = JSON.stringify(jsonCard);
+      const textMatch = jsonStr.match(/"content":"([^"]+)"/);
+      if (textMatch) return textMatch[1];
+      return "[Card with content]";
+    } catch {
+      return "[Interactive Card]";
+    }
+  }
+  
+  // Try to find elements array in different possible locations
+  let elements = card.elements ?? card.card?.elements;
+  
+  // Handle nested array case: elements can be [[...]] from API
+  if (Array.isArray(elements) && elements.length > 0 && Array.isArray(elements[0])) {
+    // Flatten nested arrays: [[a,b],[c,d]] -> [a,b,c,d]
+    elements = (elements as unknown[]).flat();
+  }
+  
+  if (!elements || !Array.isArray(elements)) {
+    // If no elements array, try to extract any text content
+    const extractAllText = (obj: unknown): string => {
+      if (typeof obj === "string") return obj;
+      if (!obj || typeof obj !== "object") return "";
+      if (Array.isArray(obj)) return obj.map(extractAllText).filter(Boolean).join(" | ");
+      const o = obj as Record<string, unknown>;
+      if (o.text && typeof o.text === "string") return o.text;
+      if (o.content && typeof o.content === "string") return o.content;
+      if (o.title && typeof o.title === "string") return o.title;
+      if (o.label && typeof o.label === "string") return o.label;
+      // Recurse into known container fields
+      const containerFields = ["elements", "actions", "header", "body"];
+      for (const f of containerFields) {
+        if (o[f]) {
+          const nested = extractAllText(o[f]);
+          if (nested) return nested;
+        }
+      }
+      return "";
+    };
+    const text = extractAllText(card);
+    return text || "[Interactive Card]";
   }
 
   const texts: string[] = [];
-  for (const element of candidate.elements) {
+  for (const element of elements) {
     if (!element || typeof element !== "object") {
       continue;
     }
     const item = element as {
       tag?: string;
       content?: string;
-      text?: { content?: string };
+      text?: string | { content?: string };
     };
-    if (item.tag === "div" && typeof item.text?.content === "string") {
-      texts.push(item.text.content);
+    // Handle both "text" as string and "text" as object
+    const textContent = typeof item.text === "string" ? item.text : (item.text as { content?: string })?.content;
+    if (item.tag === "div" && textContent) {
+      texts.push(textContent);
       continue;
     }
     if (item.tag === "markdown" && typeof item.content === "string") {
       texts.push(item.content);
+    }
+    if (item.tag === "text" && textContent) {
+      texts.push(textContent);
     }
   }
   return texts.join("\n").trim() || "[Interactive Card]";
@@ -137,7 +210,7 @@ function parseQuotedMessageContent(rawContent: string, msgType: string): string 
     return parsePostContent(rawContent).textContent;
   }
 
-  if (msgType === "interactive") {
+  if (msgType === "interactive" || msgType === "interactive_card") {
     return parseInteractiveCardContent(parsed);
   }
 
@@ -177,6 +250,7 @@ export async function getMessageFeishu(params: {
   try {
     const response = (await client.im.message.get({
       path: { message_id: messageId },
+      params: { card_msg_content_type: "raw_card_content" },
     })) as {
       code?: number;
       msg?: string;

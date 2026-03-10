@@ -342,6 +342,41 @@ function parseMessageContent(content: string, messageType: string): string {
       // Return placeholder; actual content fetched asynchronously in handleFeishuMessage
       return "[Merged and Forwarded Message - loading...]";
     }
+    // Handle interactive card messages
+    if (messageType === "interactive_card") {
+      try {
+        const cardParsed = JSON.parse(content);
+        // Feishu card can be wrapped in "card" key or direct
+        const card = cardParsed.card || cardParsed;
+        // Extract text from card elements
+        const extractTextFromCard = (obj: unknown): string => {
+          if (typeof obj === "string") return obj;
+          if (typeof obj !== "object" || obj === null) return "";
+          if (Array.isArray(obj)) {
+            return obj.map(extractTextFromCard).filter(Boolean).join(" | ");
+          }
+          const record = obj as Record<string, unknown>;
+          // Common text fields in Feishu cards
+          if (typeof record.text === "string") return record.text;
+          if (typeof record.content === "string") return record.content;
+          if (typeof record.title === "string") return record.title;
+          if (typeof record.value === "string") return record.value;
+          if (typeof record.label === "string") return record.label;
+          if (typeof record.url === "string") return record.url;
+          if (record.elements) return extractTextFromCard(record.elements);
+          if (record.actions) return extractTextFromCard(record.actions);
+          if (record.header) return extractTextFromCard(record.header);
+          if (record.body) return extractTextFromCard(record.body);
+          return "";
+        };
+        const cardText = extractTextFromCard(card);
+        if (cardText) return `[Card]: ${cardText}`;
+        // Return raw content for debugging if no text found
+        return `[Interactive Card: ${content.slice(0, 200)}]`;
+      } catch {
+        return "[Interactive Card]";
+      }
+    }
     return content;
   } catch {
     return content;
