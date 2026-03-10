@@ -96,14 +96,14 @@ function parseInteractiveCardContent(parsed: unknown): string {
   if (card.json_card) {
     try {
       const jsonCard = JSON.parse(card.json_card as string);
-      return extractTextFromCard(jsonCard);
+      return extractTextFromCard(jsonCard) || "[Interactive Card]";
     } catch {
       return "[Interactive Card]";
     }
   }
   
   // Simple extraction from regular card structure
-  return extractTextFromCard(parsed);
+  return extractTextFromCard(parsed) || "[Interactive Card]";
 }
 
 function extractTextFromCard(obj: unknown): string {
@@ -116,14 +116,15 @@ function extractTextFromCard(obj: unknown): string {
   for (const f of fields) {
     if (typeof o[f] === "string") return o[f] as string;
   }
-  // Recurse into containers
+  // Recurse into containers - collect from all, don't early-return
+  const parts: string[] = [];
   for (const f of ["elements", "actions", "header", "body"]) {
     if (o[f]) {
       const result = extractTextFromCard(o[f]);
-      if (result) return result;
+      if (result) parts.push(result);
     }
   }
-  return "";
+  return parts.join("\n");
 }
 
 function parseQuotedMessageContent(rawContent: string, msgType: string): string {
