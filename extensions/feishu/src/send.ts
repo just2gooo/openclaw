@@ -109,7 +109,10 @@ function parseInteractiveCardContent(parsed: unknown): string {
 function extractTextFromCard(obj: unknown): string {
   if (typeof obj === "string") return obj;
   if (!obj || typeof obj !== "object") return "";
-  if (Array.isArray(obj)) return obj.map(extractTextFromCard).filter(Boolean).join(" | ");
+  if (Array.isArray(obj)) {
+    const results = obj.map(extractTextFromCard).filter(Boolean);
+    return results.length > 1 ? results.join("\n") : results[0] || "";
+  }
   
   const o = obj as Record<string, unknown>;
   const fields = ["text", "content", "title", "label"];
